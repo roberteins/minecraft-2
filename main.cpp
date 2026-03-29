@@ -20,6 +20,11 @@ static constexpr int WORLD_X = 48;
 static constexpr int WORLD_Y = 32;
 static constexpr int WORLD_Z = 48;
 static constexpr float PI = 3.1415926535f;
+static constexpr int HOTBAR_SLOTS = 9;
+static constexpr int INVENTORY_ROWS = 4; // first row is hotbar
+static constexpr int INVENTORY_COLS = 9;
+static constexpr int INVENTORY_SLOTS = INVENTORY_ROWS * INVENTORY_COLS;
+static constexpr int MAX_STACK = 64;
 
 enum BlockType : uint8_t {
     AIR = 0,
@@ -45,7 +50,8 @@ static float yaw = 0.0f, pitch = 0.0f;
 static bool keyDown[256]{};
 static bool onGround = false;
 static int selectedSlot = 0;
-static BlockType hotbar[9] = {GRASS, DIRT, STONE, OAK_PLANKS, COBBLESTONE, SAND, GLASS, OAK_LOG, BRICKS};
+static bool inventoryOpen = false;
+static bool warpingMouse = false;
 
 static int lastMouseX = -1, lastMouseY = -1;
 static bool firstMouse = true;
@@ -57,6 +63,13 @@ struct Texture {
     int w = 0;
     int h = 0;
 };
+
+struct ItemStack {
+    BlockType block = AIR;
+    int count = 0;
+};
+
+static ItemStack inventory[INVENTORY_SLOTS];
 
 static std::map<std::string, Texture> texCache;
 
@@ -70,6 +83,45 @@ uint8_t getBlock(int x, int y, int z) {
 void setBlock(int x, int y, int z, uint8_t b) {
     if (x < 0 || y < 0 || z < 0 || x >= WORLD_X || y >= WORLD_Y || z >= WORLD_Z) return;
     world[idx(x, y, z)] = b;
+}
+
+void initInventory() {
+    BlockType starter[HOTBAR_SLOTS] = {GRASS, DIRT, STONE, OAK_PLANKS, COBBLESTONE, SAND, GLASS, OAK_LOG, BRICKS};
+    for (int i = 0; i < HOTBAR_SLOTS; ++i) {
+        inventory[i].block = starter[i];
+        inventory[i].count = MAX_STACK;
+    }
+}
+
+bool addToInventory(BlockType block, int amount) {
+    if (block == AIR || amount <= 0) return true;
+    for (int i = 0; i < INVENTORY_SLOTS && amount > 0; ++i) {
+        if (inventory[i].block == block && inventory[i].count < MAX_STACK) {
+            int add = std::min(MAX_STACK - inventory[i].count, amount);
+            inventory[i].count += add;
+            amount -= add;
+        }
+    }
+    for (int i = 0; i < INVENTORY_SLOTS && amount > 0; ++i) {
+        if (inventory[i].count == 0 || inventory[i].block == AIR) {
+            inventory[i].block = block;
+            int add = std::min(MAX_STACK, amount);
+            inventory[i].count = add;
+            amount -= add;
+        }
+    }
+    return amount == 0;
+}
+
+bool consumeHotbarSelected() {
+    ItemStack& s = inventory[selectedSlot];
+    if (s.count <= 0 || s.block == AIR) return false;
+    s.count--;
+    if (s.count <= 0) {
+        s.count = 0;
+        s.block = AIR;
+    }
+    return true;
 }
 
 Texture makeFallbackTexture(uint8_t r, uint8_t g, uint8_t b) {
@@ -356,12 +408,12 @@ void drawHotbar() {
 
     int slot = 52;
     int pad = 6;
-    int total = 9 * slot + 8 * pad;
+    int total = HOTBAR_SLOTS * slot + (HOTBAR_SLOTS - 1) * pad;
     int x0 = (windowW - total) / 2;
     int y = windowH - 72;
 
     glDisable(GL_TEXTURE_2D);
-    for (int i = 0; i < 9; ++i) {
+    for (int i = 0; i < HOTBAR_SLOTS; ++i) {
         int x = x0 + i * (slot + pad);
         if (i == selectedSlot) glColor3f(1.0f, 0.9f, 0.2f);
         else glColor3f(0.12f, 0.12f, 0.12f);
@@ -374,24 +426,98 @@ void drawHotbar() {
         glVertex2f(x, y); glVertex2f(x + slot, y); glVertex2f(x + slot, y + slot); glVertex2f(x, y + slot);
         glEnd();
 
-        auto bt = hotbar[i];
-        auto names = blockTex[bt];
-        GLuint tid = texByName(names.side).id;
-        glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, tid);
-        glColor3f(1,1,1);
-        glBegin(GL_QUADS);
-        glTexCoord2f(0,0); glVertex2f(x + 8, y + 8);
-        glTexCoord2f(1,0); glVertex2f(x + slot - 8, y + 8);
-        glTexCoord2f(1,1); glVertex2f(x + slot - 8, y + slot - 8);
-        glTexCoord2f(0,1); glVertex2f(x + 8, y + slot - 8);
-        glEnd();
+        if (inventory[i].count > 0 && inventory[i].block != AIR) {
+            auto names = blockTex[inventory[i].block];
+            GLuint tid = texByName(names.side).id;
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, tid);
+            glColor3f(1,1,1);
+            glBegin(GL_QUADS);
+            glTexCoord2f(0,0); glVertex2f(x + 8, y + 8);
+            glTexCoord2f(1,0); glVertex2f(x + slot - 8, y + 8);
+            glTexCoord2f(1,1); glVertex2f(x + slot - 8, y + slot - 8);
+            glTexCoord2f(0,1); glVertex2f(x + 8, y + slot - 8);
+            glEnd();
+        }
         glDisable(GL_TEXTURE_2D);
+
+        if (inventory[i].count > 0) {
+            glColor3f(1, 1, 1);
+            std::string n = std::to_string(inventory[i].count);
+            glRasterPos2f((float)(x + slot - 8 - (int)n.size() * 8), (float)(y + slot - 8));
+            for (char c : n) glutBitmapCharacter(GLUT_BITMAP_8_BY_13, c);
+        }
     }
 
     glColor3f(1, 1, 1);
     glRasterPos2f(18, 24);
-    std::string tip = "WASD move | Mouse look | LMB break | RMB place | 1-9 select | Space jump | Tab sprint";
+    std::string tip = "WASD move | Mouse look | LMB break | RMB place | E inventory | 1-9 select";
+    for (char c : tip) glutBitmapCharacter(GLUT_BITMAP_8_BY_13, c);
+
+    glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW);
+}
+
+void drawInventory() {
+    if (!inventoryOpen) return;
+    glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity();
+    glOrtho(0, windowW, windowH, 0, -1, 1);
+    glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity();
+
+    glDisable(GL_TEXTURE_2D);
+    glColor4f(0.0f, 0.0f, 0.0f, 0.55f);
+    glBegin(GL_QUADS);
+    glVertex2f(0, 0); glVertex2f((float)windowW, 0); glVertex2f((float)windowW, (float)windowH); glVertex2f(0, (float)windowH);
+    glEnd();
+
+    int slot = 52, pad = 6;
+    int totalW = INVENTORY_COLS * slot + (INVENTORY_COLS - 1) * pad;
+    int totalH = INVENTORY_ROWS * slot + (INVENTORY_ROWS - 1) * pad;
+    int x0 = (windowW - totalW) / 2;
+    int y0 = (windowH - totalH) / 2;
+
+    for (int r = 0; r < INVENTORY_ROWS; ++r) {
+        for (int c = 0; c < INVENTORY_COLS; ++c) {
+            int i = r * INVENTORY_COLS + c;
+            int x = x0 + c * (slot + pad);
+            int y = y0 + r * (slot + pad);
+            bool isSelected = (i == selectedSlot);
+
+            if (isSelected) glColor3f(1.0f, 0.9f, 0.2f);
+            else glColor3f(0.14f, 0.14f, 0.14f);
+            glBegin(GL_QUADS);
+            glVertex2f(x - 2, y - 2); glVertex2f(x + slot + 2, y - 2); glVertex2f(x + slot + 2, y + slot + 2); glVertex2f(x - 2, y + slot + 2);
+            glEnd();
+
+            glColor3f(0.25f, 0.25f, 0.25f);
+            glBegin(GL_QUADS);
+            glVertex2f(x, y); glVertex2f(x + slot, y); glVertex2f(x + slot, y + slot); glVertex2f(x, y + slot);
+            glEnd();
+
+            if (inventory[i].count > 0 && inventory[i].block != AIR) {
+                auto names = blockTex[inventory[i].block];
+                GLuint tid = texByName(names.side).id;
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, tid);
+                glColor3f(1, 1, 1);
+                glBegin(GL_QUADS);
+                glTexCoord2f(0,0); glVertex2f(x + 8, y + 8);
+                glTexCoord2f(1,0); glVertex2f(x + slot - 8, y + 8);
+                glTexCoord2f(1,1); glVertex2f(x + slot - 8, y + slot - 8);
+                glTexCoord2f(0,1); glVertex2f(x + 8, y + slot - 8);
+                glEnd();
+                glDisable(GL_TEXTURE_2D);
+
+                glColor3f(1, 1, 1);
+                std::string n = std::to_string(inventory[i].count);
+                glRasterPos2f((float)(x + slot - 8 - (int)n.size() * 8), (float)(y + slot - 8));
+                for (char ch : n) glutBitmapCharacter(GLUT_BITMAP_8_BY_13, ch);
+            }
+        }
+    }
+
+    glColor3f(1, 1, 1);
+    std::string tip = "Inventory (E to close) - top row is hotbar";
+    glRasterPos2f((float)x0, (float)(y0 - 14));
     for (char c : tip) glutBitmapCharacter(GLUT_BITMAP_8_BY_13, c);
 
     glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW);
@@ -454,6 +580,7 @@ void display() {
     renderWorld();
     drawCrosshair();
     drawHotbar();
+    drawInventory();
 
     glutSwapBuffers();
 }
@@ -462,7 +589,7 @@ void idle() {
     int now = glutGet(GLUT_ELAPSED_TIME);
     deltaTime = std::max(0.001f, (now - lastTicks) / 1000.0f);
     lastTicks = now;
-    physicsStep();
+    if (!inventoryOpen) physicsStep();
     glutPostRedisplay();
 }
 
@@ -474,22 +601,41 @@ void reshape(int w, int h) {
 void keyboard(unsigned char key, int, int) {
     keyDown[key] = true;
     if (key >= '1' && key <= '9') selectedSlot = key - '1';
+    if (key == 'e' || key == 'E') {
+        inventoryOpen = !inventoryOpen;
+        firstMouse = true;
+        if (inventoryOpen) {
+            glutSetCursor(GLUT_CURSOR_LEFT_ARROW);
+        } else {
+            glutSetCursor(GLUT_CURSOR_NONE);
+            warpingMouse = true;
+            glutWarpPointer(windowW / 2, windowH / 2);
+        }
+    }
     if (key == 27) std::exit(0);
 }
 
 void keyboardUp(unsigned char key, int, int) { keyDown[key] = false; }
 
 void mouseMotion(int x, int y) {
-    if (firstMouse) { lastMouseX = x; lastMouseY = y; firstMouse = false; }
-    int dx = x - lastMouseX;
-    int dy = y - lastMouseY;
-    lastMouseX = x; lastMouseY = y;
+    if (inventoryOpen) return;
+    if (warpingMouse) { warpingMouse = false; return; }
+
+    int cx = windowW / 2;
+    int cy = windowH / 2;
+    if (firstMouse) { lastMouseX = cx; lastMouseY = cy; firstMouse = false; }
+    int dx = x - cx;
+    int dy = y - cy;
+    if (dx == 0 && dy == 0) return;
 
     float sens = 0.0022f;
     yaw += dx * sens;
     pitch -= dy * sens;
     if (pitch > 1.55f) pitch = 1.55f;
     if (pitch < -1.55f) pitch = -1.55f;
+
+    warpingMouse = true;
+    glutWarpPointer(cx, cy);
 }
 
 void mouseButton(int button, int state, int, int) {
@@ -498,10 +644,14 @@ void mouseButton(int button, int state, int, int) {
     if (!raycastBlock(hit, prev)) return;
 
     if (button == GLUT_LEFT_BUTTON) {
+        BlockType broken = (BlockType)getBlock(hit.x, hit.y, hit.z);
         setBlock(hit.x, hit.y, hit.z, AIR);
+        addToInventory(broken, 1);
     } else if (button == GLUT_RIGHT_BUTTON) {
+        if (inventory[selectedSlot].count <= 0 || inventory[selectedSlot].block == AIR) return;
         if (getBlock(prev.x, prev.y, prev.z) == AIR) {
-            setBlock(prev.x, prev.y, prev.z, hotbar[selectedSlot]);
+            setBlock(prev.x, prev.y, prev.z, inventory[selectedSlot].block);
+            consumeHotbarSelected();
         }
     }
 }
@@ -526,6 +676,7 @@ int main(int argc, char** argv) {
 
     initGL();
     generateWorld();
+    initInventory();
 
     std::cout << "Asset root: " << (assetRoot().empty() ? "(none, using fallback textures)" : assetRoot()) << "\n";
 
@@ -540,6 +691,7 @@ int main(int argc, char** argv) {
 
     lastTicks = glutGet(GLUT_ELAPSED_TIME);
     glutSetCursor(GLUT_CURSOR_NONE);
+    warpingMouse = true;
     glutWarpPointer(windowW / 2, windowH / 2);
     firstMouse = true;
 
