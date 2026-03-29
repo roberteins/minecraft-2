@@ -77,6 +77,8 @@ struct BlockTextureSet {
 
 static ItemStack inventory[INVENTORY_SLOTS];
 static BlockTextureSet blockTextures[BLOCK_COUNT];
+static Texture hudHotbarTex{};
+static Texture hudHotbarSelTex{};
 
 static std::map<std::string, Texture> texCache;
 
@@ -267,6 +269,35 @@ std::string resolveTexturePath(const std::string& name) {
     return "";
 }
 
+std::string resolveGuiTexturePath(const std::string& name) {
+    std::vector<std::string> roots;
+    const char* env = std::getenv("MC_ASSET_ROOT");
+    if (env && *env) roots.emplace_back(env);
+    roots.emplace_back("/src");
+    roots.emplace_back("./src");
+    roots.emplace_back("/src/assets/minecraft");
+    roots.emplace_back("./src/assets/minecraft");
+    roots.emplace_back("/src/minecraft");
+    roots.emplace_back("./src/minecraft");
+
+    const std::vector<std::string> patterns = {
+        "textures/gui/hud/" + name + ".png",
+        "textures/gui/sprites/hud/" + name + ".png",
+        "assets/minecraft/textures/gui/hud/" + name + ".png",
+        "assets/minecraft/textures/gui/sprites/hud/" + name + ".png",
+        "minecraft/textures/gui/hud/" + name + ".png",
+        "minecraft/textures/gui/sprites/hud/" + name + ".png"
+    };
+
+    for (const auto& root : roots) {
+        for (const auto& rel : patterns) {
+            fs::path p = fs::path(root) / rel;
+            if (fs::exists(p)) return p.string();
+        }
+    }
+    return "";
+}
+
 Texture texByName(const std::string& name) {
     std::string path = resolveTexturePath(name);
     uint8_t r = 180, g = 180, b = 180;
@@ -285,6 +316,14 @@ void preloadBlockTextures() {
         blockTextures[b].side = texByName(tx.side).id;
         blockTextures[b].bottom = texByName(tx.bottom).id;
     }
+}
+
+void preloadGuiTextures() {
+    std::string hotbarPath = resolveGuiTexturePath("hotbar");
+    if (!hotbarPath.empty()) hudHotbarTex = loadTexture("ui_hotbar", hotbarPath, 90, 90, 90);
+
+    std::string selPath = resolveGuiTexturePath("hotbar_selection");
+    if (!selPath.empty()) hudHotbarSelTex = loadTexture("ui_hotbar_selection", selPath, 255, 230, 120);
 }
 
 void drawFace(float x, float y, float z, int face) {
@@ -460,6 +499,22 @@ void drawHotbar() {
     int x0 = (windowW - total) / 2;
     int y = windowH - 72;
 
+    if (hudHotbarTex.id != 0) {
+        int bgW = total + 16;
+        int bgH = slot + 14;
+        int bgX = x0 - 8;
+        int bgY = y - 7;
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, hudHotbarTex.id);
+        glColor3f(1, 1, 1);
+        glBegin(GL_QUADS);
+        glTexCoord2f(0, 0); glVertex2f((float)bgX, (float)bgY);
+        glTexCoord2f(1, 0); glVertex2f((float)(bgX + bgW), (float)bgY);
+        glTexCoord2f(1, 1); glVertex2f((float)(bgX + bgW), (float)(bgY + bgH));
+        glTexCoord2f(0, 1); glVertex2f((float)bgX, (float)(bgY + bgH));
+        glEnd();
+    }
+
     glDisable(GL_TEXTURE_2D);
     for (int i = 0; i < HOTBAR_SLOTS; ++i) {
         int x = x0 + i * (slot + pad);
@@ -474,7 +529,20 @@ void drawHotbar() {
         glVertex2f(x, y); glVertex2f(x + slot, y); glVertex2f(x + slot, y + slot); glVertex2f(x, y + slot);
         glEnd();
 
-        if (inventory[i].count > 0 && inventory[i].block != AIR) {
+        if (hudHotbarSelTex.id != 0 && i == selectedSlot) {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, hudHotbarSelTex.id);
+            glColor3f(1, 1, 1);
+            glBegin(GL_QUADS);
+            glTexCoord2f(0, 0); glVertex2f((float)(x - 3), (float)(y - 3));
+            glTexCoord2f(1, 0); glVertex2f((float)(x + slot + 3), (float)(y - 3));
+            glTexCoord2f(1, 1); glVertex2f((float)(x + slot + 3), (float)(y + slot + 3));
+            glTexCoord2f(0, 1); glVertex2f((float)(x - 3), (float)(y + slot + 3));
+            glEnd();
+            glDisable(GL_TEXTURE_2D);
+        }
+
+        if (inventory[i].count > 0 && inventory[i].block > AIR && inventory[i].block < BLOCK_COUNT) {
             auto names = blockTex[inventory[i].block];
             GLuint tid = texByName(names.side).id;
             glEnable(GL_TEXTURE_2D);
@@ -541,7 +609,7 @@ void drawInventory() {
             glVertex2f(x, y); glVertex2f(x + slot, y); glVertex2f(x + slot, y + slot); glVertex2f(x, y + slot);
             glEnd();
 
-            if (inventory[i].count > 0 && inventory[i].block != AIR) {
+            if (inventory[i].count > 0 && inventory[i].block > AIR && inventory[i].block < BLOCK_COUNT) {
                 auto names = blockTex[inventory[i].block];
                 GLuint tid = texByName(names.side).id;
                 glEnable(GL_TEXTURE_2D);
@@ -699,6 +767,8 @@ void reshape(int w, int h) {
 void keyboard(unsigned char key, int, int) {
     keyDown[key] = true;
     if (key >= '1' && key <= '9') selectedSlot = key - '1';
+    if (selectedSlot < 0) selectedSlot = 0;
+    if (selectedSlot >= HOTBAR_SLOTS) selectedSlot = HOTBAR_SLOTS - 1;
     if (key == 'e' || key == 'E') {
         inventoryOpen = !inventoryOpen;
         firstMouse = true;
@@ -737,6 +807,7 @@ void mouseMotion(int x, int y) {
 }
 
 void mouseButton(int button, int state, int, int) {
+    if (inventoryOpen) return;
     if (state != GLUT_DOWN) return;
     IVec3 hit{}, prev{};
     if (!raycastBlock(hit, prev)) return;
@@ -776,6 +847,7 @@ int main(int argc, char** argv) {
     generateWorld();
     initInventory();
     preloadBlockTextures();
+    preloadGuiTextures();
 
     std::cout << "Asset root: " << (assetRoot().empty() ? "(none, using fallback textures)" : assetRoot()) << "\n";
 
