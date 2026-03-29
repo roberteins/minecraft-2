@@ -485,6 +485,7 @@ bool raycastBlock(IVec3& hit, IVec3& prev, float maxDist = 6.0f) {
 }
 
 void drawCrosshair() {
+    glDisable(GL_DEPTH_TEST);
     glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity();
     glOrtho(0, windowW, windowH, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity();
@@ -496,9 +497,13 @@ void drawCrosshair() {
     glEnd();
     glEnable(GL_TEXTURE_2D);
     glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW);
+    glEnable(GL_DEPTH_TEST);
 }
 
 void drawHotbar() {
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity();
     glOrtho(0, windowW, windowH, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity();
@@ -581,10 +586,15 @@ void drawHotbar() {
     for (char c : tip) glutBitmapCharacter(GLUT_BITMAP_8_BY_13, c);
 
     glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW);
+    glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
 }
 
 void drawInventory() {
     if (!inventoryOpen) return;
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity();
     glOrtho(0, windowW, windowH, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity();
@@ -647,6 +657,8 @@ void drawInventory() {
     for (char c : tip) glutBitmapCharacter(GLUT_BITMAP_8_BY_13, c);
 
     glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW);
+    glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
 }
 
 void renderWorld() {
