@@ -281,8 +281,8 @@ std::string resolveGuiTexturePath(const std::string& name) {
     roots.emplace_back("./src/minecraft");
 
     const std::vector<std::string> patterns = {
-        "textures/gui/hud/" + name + ".png",
         "textures/gui/sprites/hud/" + name + ".png",
+        "textures/gui/hud/" + name + ".png",
         "assets/minecraft/textures/gui/hud/" + name + ".png",
         "assets/minecraft/textures/gui/sprites/hud/" + name + ".png",
         "minecraft/textures/gui/hud/" + name + ".png",
@@ -319,11 +319,21 @@ void preloadBlockTextures() {
 }
 
 void preloadGuiTextures() {
-    std::string hotbarPath = resolveGuiTexturePath("hotbar");
+    // Prefer the exact vanilla HUD sprite location requested by the user.
+    std::string hotbarPath;
+    if (fs::exists("/src/textures/gui/sprites/hud/hotbar.png")) hotbarPath = "/src/textures/gui/sprites/hud/hotbar.png";
+    if (hotbarPath.empty() && fs::exists("./src/textures/gui/sprites/hud/hotbar.png")) hotbarPath = "./src/textures/gui/sprites/hud/hotbar.png";
+    if (hotbarPath.empty()) hotbarPath = resolveGuiTexturePath("hotbar");
     if (!hotbarPath.empty()) hudHotbarTex = loadTexture("ui_hotbar", hotbarPath, 90, 90, 90);
 
-    std::string selPath = resolveGuiTexturePath("hotbar_selection");
+    std::string selPath;
+    if (fs::exists("/src/textures/gui/sprites/hud/hotbar_selection.png")) selPath = "/src/textures/gui/sprites/hud/hotbar_selection.png";
+    if (selPath.empty() && fs::exists("./src/textures/gui/sprites/hud/hotbar_selection.png")) selPath = "./src/textures/gui/sprites/hud/hotbar_selection.png";
+    if (selPath.empty()) selPath = resolveGuiTexturePath("hotbar_selection");
     if (!selPath.empty()) hudHotbarSelTex = loadTexture("ui_hotbar_selection", selPath, 255, 230, 120);
+
+    std::cerr << "[hud] hotbar texture: " << (hotbarPath.empty() ? "(missing, fallback UI)" : hotbarPath) << "\n";
+    std::cerr << "[hud] selection texture: " << (selPath.empty() ? "(missing, fallback UI)" : selPath) << "\n";
 }
 
 void drawFace(float x, float y, float z, int face) {
