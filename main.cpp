@@ -1,0 +1,528 @@
+#include <GL/glut.h>
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <iostream>
+#include <map>
+#include <string>
+#include <vector>
+
+#include <png.h>
+
+namespace fs = std::filesystem;
+
+struct Vec3 { float x, y, z; };
+struct IVec3 { int x, y, z; };
+
+static constexpr int WORLD_X = 48;
+static constexpr int WORLD_Y = 32;
+static constexpr int WORLD_Z = 48;
+static constexpr float PI = 3.1415926535f;
+
+enum BlockType : uint8_t {
+    AIR = 0,
+    GRASS,
+    DIRT,
+    STONE,
+    OAK_PLANKS,
+    COBBLESTONE,
+    SAND,
+    GLASS,
+    OAK_LOG,
+    BRICKS,
+    BLOCK_COUNT
+};
+
+struct BlockTex { const char* top; const char* side; const char* bottom; };
+
+static std::vector<uint8_t> world(WORLD_X * WORLD_Y * WORLD_Z, AIR);
+static int windowW = 1280, windowH = 720;
+static Vec3 playerPos{24.0f, 12.0f, 24.0f};
+static Vec3 velocity{0, 0, 0};
+static float yaw = 0.0f, pitch = 0.0f;
+static bool keyDown[256]{};
+static bool onGround = false;
+static int selectedSlot = 0;
+static BlockType hotbar[9] = {GRASS, DIRT, STONE, OAK_PLANKS, COBBLESTONE, SAND, GLASS, OAK_LOG, BRICKS};
+
+static int lastMouseX = -1, lastMouseY = -1;
+static bool firstMouse = true;
+static float deltaTime = 1.0f / 60.0f;
+static int lastTicks = 0;
+
+struct Texture {
+    GLuint id = 0;
+    int w = 0;
+    int h = 0;
+};
+
+static std::map<std::string, Texture> texCache;
+
+inline int idx(int x, int y, int z) { return x + WORLD_X * (z + WORLD_Z * y); }
+
+uint8_t getBlock(int x, int y, int z) {
+    if (x < 0 || y < 0 || z < 0 || x >= WORLD_X || y >= WORLD_Y || z >= WORLD_Z) return AIR;
+    return world[idx(x, y, z)];
+}
+
+void setBlock(int x, int y, int z, uint8_t b) {
+    if (x < 0 || y < 0 || z < 0 || x >= WORLD_X || y >= WORLD_Y || z >= WORLD_Z) return;
+    world[idx(x, y, z)] = b;
+}
+
+Texture makeFallbackTexture(uint8_t r, uint8_t g, uint8_t b) {
+    Texture t;
+    uint8_t data[16 * 16 * 4];
+    for (int y = 0; y < 16; ++y) {
+        for (int x = 0; x < 16; ++x) {
+            bool c = ((x / 4) + (y / 4)) % 2 == 0;
+            int i = (y * 16 + x) * 4;
+            data[i + 0] = c ? r : uint8_t(std::max(0, r - 30));
+            data[i + 1] = c ? g : uint8_t(std::max(0, g - 30));
+            data[i + 2] = c ? b : uint8_t(std::max(0, b - 30));
+            data[i + 3] = 255;
+        }
+    }
+    glGenTextures(1, &t.id);
+    glBindTexture(GL_TEXTURE_2D, t.id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 16, 16, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    t.w = t.h = 16;
+    return t;
+}
+
+Texture loadTexture(const std::string& logical, const std::string& path, uint8_t fr, uint8_t fg, uint8_t fb) {
+    if (texCache.count(logical)) return texCache[logical];
+    Texture t;
+    FILE* fp = std::fopen(path.c_str(), "rb");
+    if (!fp) {
+        t = makeFallbackTexture(fr, fg, fb);
+        texCache[logical] = t;
+        std::cerr << "[warn] texture missing: " << path << " -> fallback\n";
+        return t;
+    }
+
+    png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    png_infop info = png_create_info_struct(png);
+    if (!png || !info || setjmp(png_jmpbuf(png))) {
+        if (png) png_destroy_read_struct(&png, &info, nullptr);
+        std::fclose(fp);
+        t = makeFallbackTexture(fr, fg, fb);
+        texCache[logical] = t;
+        return t;
+    }
+
+    png_init_io(png, fp);
+    png_read_info(png, info);
+    t.w = png_get_image_width(png, info);
+    t.h = png_get_image_height(png, info);
+    png_byte color_type = png_get_color_type(png, info);
+    png_byte bit_depth = png_get_bit_depth(png, info);
+
+    if (bit_depth == 16) png_set_strip_16(png);
+    if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
+    if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8) png_set_expand_gray_1_2_4_to_8(png);
+    if (png_get_valid(png, info, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png);
+    if (color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_PALETTE)
+        png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
+    if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
+        png_set_gray_to_rgb(png);
+
+    png_read_update_info(png, info);
+
+    std::vector<png_byte> image(t.w * t.h * 4);
+    std::vector<png_bytep> rows(t.h);
+    for (int y = 0; y < t.h; ++y) rows[y] = image.data() + y * t.w * 4;
+    png_read_image(png, rows.data());
+
+    png_destroy_read_struct(&png, &info, nullptr);
+    std::fclose(fp);
+
+    glGenTextures(1, &t.id);
+    glBindTexture(GL_TEXTURE_2D, t.id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, t.w, t.h, 0, GL_RGBA, GL_UNSIGNED_BYTE, image.data());
+    texCache[logical] = t;
+    return t;
+}
+
+static std::map<BlockType, BlockTex> blockTex = {
+    {GRASS, {"grass_block_top", "grass_block_side", "dirt"}},
+    {DIRT, {"dirt", "dirt", "dirt"}},
+    {STONE, {"stone", "stone", "stone"}},
+    {OAK_PLANKS, {"oak_planks", "oak_planks", "oak_planks"}},
+    {COBBLESTONE, {"cobblestone", "cobblestone", "cobblestone"}},
+    {SAND, {"sand", "sand", "sand"}},
+    {GLASS, {"glass", "glass", "glass"}},
+    {OAK_LOG, {"oak_log_top", "oak_log", "oak_log_top"}},
+    {BRICKS, {"bricks", "bricks", "bricks"}},
+};
+
+std::string assetRoot() {
+    const char* env = std::getenv("MC_ASSET_ROOT");
+    if (env && *env) return std::string(env);
+    if (fs::exists("/src/textures")) return "/src";
+    if (fs::exists("./src/textures")) return "./src";
+    return "";
+}
+
+Texture texByName(const std::string& name) {
+    std::string root = assetRoot();
+    std::string path = root.empty() ? "" : root + "/textures/block/" + name + ".png";
+    uint8_t r = 180, g = 180, b = 180;
+    if (name.find("grass") != std::string::npos) { r = 95; g = 180; b = 60; }
+    if (name.find("dirt") != std::string::npos) { r = 130; g = 95; b = 65; }
+    if (name.find("stone") != std::string::npos) { r = 120; g = 120; b = 120; }
+    if (name.find("sand") != std::string::npos) { r = 218; g = 208; b = 136; }
+    if (name.find("glass") != std::string::npos) { r = 170; g = 220; b = 230; }
+    return loadTexture(name, path, r, g, b);
+}
+
+void drawFace(float x, float y, float z, int face, GLuint texId) {
+    glBindTexture(GL_TEXTURE_2D, texId);
+    glBegin(GL_QUADS);
+    switch (face) {
+        case 0: // +X
+            glTexCoord2f(0, 0); glVertex3f(x + 1, y, z + 1);
+            glTexCoord2f(1, 0); glVertex3f(x + 1, y, z);
+            glTexCoord2f(1, 1); glVertex3f(x + 1, y + 1, z);
+            glTexCoord2f(0, 1); glVertex3f(x + 1, y + 1, z + 1);
+            break;
+        case 1: // -X
+            glTexCoord2f(0, 0); glVertex3f(x, y, z);
+            glTexCoord2f(1, 0); glVertex3f(x, y, z + 1);
+            glTexCoord2f(1, 1); glVertex3f(x, y + 1, z + 1);
+            glTexCoord2f(0, 1); glVertex3f(x, y + 1, z);
+            break;
+        case 2: // +Y top
+            glTexCoord2f(0, 0); glVertex3f(x, y + 1, z + 1);
+            glTexCoord2f(1, 0); glVertex3f(x + 1, y + 1, z + 1);
+            glTexCoord2f(1, 1); glVertex3f(x + 1, y + 1, z);
+            glTexCoord2f(0, 1); glVertex3f(x, y + 1, z);
+            break;
+        case 3: // -Y bottom
+            glTexCoord2f(0, 0); glVertex3f(x, y, z);
+            glTexCoord2f(1, 0); glVertex3f(x + 1, y, z);
+            glTexCoord2f(1, 1); glVertex3f(x + 1, y, z + 1);
+            glTexCoord2f(0, 1); glVertex3f(x, y, z + 1);
+            break;
+        case 4: // +Z
+            glTexCoord2f(0, 0); glVertex3f(x, y, z + 1);
+            glTexCoord2f(1, 0); glVertex3f(x + 1, y, z + 1);
+            glTexCoord2f(1, 1); glVertex3f(x + 1, y + 1, z + 1);
+            glTexCoord2f(0, 1); glVertex3f(x, y + 1, z + 1);
+            break;
+        case 5: // -Z
+            glTexCoord2f(0, 0); glVertex3f(x + 1, y, z);
+            glTexCoord2f(1, 0); glVertex3f(x, y, z);
+            glTexCoord2f(1, 1); glVertex3f(x, y + 1, z);
+            glTexCoord2f(0, 1); glVertex3f(x + 1, y + 1, z);
+            break;
+    }
+    glEnd();
+}
+
+void generateWorld() {
+    for (int x = 0; x < WORLD_X; ++x) {
+        for (int z = 0; z < WORLD_Z; ++z) {
+            float h = 8.0f + std::sin(x * 0.27f) * 2.0f + std::cos(z * 0.31f) * 2.0f;
+            int height = int(h);
+            for (int y = 0; y <= height; ++y) {
+                if (y == height) setBlock(x, y, z, GRASS);
+                else if (y > height - 3) setBlock(x, y, z, DIRT);
+                else setBlock(x, y, z, STONE);
+            }
+            if ((x + z) % 19 == 0) {
+                int y = height + 1;
+                if (y < WORLD_Y) setBlock(x, y, z, SAND);
+            }
+        }
+    }
+}
+
+void applyCamera() {
+    float cp = std::cos(pitch), sp = std::sin(pitch), cy = std::cos(yaw), sy = std::sin(yaw);
+    Vec3 forward{sy * cp, sp, -cy * cp};
+    Vec3 center{playerPos.x + forward.x, playerPos.y + 1.62f + forward.y, playerPos.z + forward.z};
+    gluLookAt(playerPos.x, playerPos.y + 1.62f, playerPos.z, center.x, center.y, center.z, 0, 1, 0);
+}
+
+bool isSolid(uint8_t b) { return b != AIR && b != GLASS; }
+
+bool intersectsSolid(const Vec3& pos) {
+    float hw = 0.3f, h = 1.8f;
+    int minX = int(std::floor(pos.x - hw));
+    int maxX = int(std::floor(pos.x + hw));
+    int minY = int(std::floor(pos.y));
+    int maxY = int(std::floor(pos.y + h));
+    int minZ = int(std::floor(pos.z - hw));
+    int maxZ = int(std::floor(pos.z + hw));
+    for (int x = minX; x <= maxX; ++x)
+        for (int y = minY; y <= maxY; ++y)
+            for (int z = minZ; z <= maxZ; ++z)
+                if (isSolid(getBlock(x, y, z))) return true;
+    return false;
+}
+
+void physicsStep() {
+    float speed = keyDown['\t'] ? 9.5f : 5.2f;
+    float dx = 0, dz = 0;
+    float sy = std::sin(yaw), cy = std::cos(yaw);
+    if (keyDown['w']) { dx += sy; dz += -cy; }
+    if (keyDown['s']) { dx -= sy; dz -= -cy; }
+    if (keyDown['a']) { dx += -cy; dz += -sy; }
+    if (keyDown['d']) { dx -= -cy; dz -= -sy; }
+    float len = std::sqrt(dx * dx + dz * dz);
+    if (len > 0.0001f) { dx /= len; dz /= len; }
+
+    velocity.x = dx * speed;
+    velocity.z = dz * speed;
+
+    if (onGround && keyDown[' ']) { velocity.y = 6.5f; onGround = false; }
+    velocity.y -= 18.0f * deltaTime;
+
+    Vec3 n = playerPos;
+    n.x += velocity.x * deltaTime;
+    if (!intersectsSolid(n)) playerPos.x = n.x;
+
+    n = playerPos;
+    n.z += velocity.z * deltaTime;
+    if (!intersectsSolid(n)) playerPos.z = n.z;
+
+    n = playerPos;
+    n.y += velocity.y * deltaTime;
+    if (!intersectsSolid(n)) {
+        playerPos.y = n.y;
+        onGround = false;
+    } else {
+        if (velocity.y < 0) onGround = true;
+        velocity.y = 0;
+    }
+
+    if (playerPos.y < 2.0f) playerPos.y = 18.0f;
+}
+
+bool raycastBlock(IVec3& hit, IVec3& prev, float maxDist = 6.0f) {
+    Vec3 origin{playerPos.x, playerPos.y + 1.62f, playerPos.z};
+    float cp = std::cos(pitch), sp = std::sin(pitch), cy = std::cos(yaw), sy = std::sin(yaw);
+    Vec3 dir{sy * cp, sp, -cy * cp};
+
+    float step = 0.02f;
+    Vec3 p = origin;
+    IVec3 last{int(std::floor(p.x)), int(std::floor(p.y)), int(std::floor(p.z))};
+    for (float t = 0; t <= maxDist; t += step) {
+        p.x = origin.x + dir.x * t;
+        p.y = origin.y + dir.y * t;
+        p.z = origin.z + dir.z * t;
+        IVec3 b{int(std::floor(p.x)), int(std::floor(p.y)), int(std::floor(p.z))};
+        if (b.x != last.x || b.y != last.y || b.z != last.z) {
+            if (getBlock(b.x, b.y, b.z) != AIR) {
+                hit = b;
+                prev = last;
+                return true;
+            }
+            last = b;
+        }
+    }
+    return false;
+}
+
+void drawCrosshair() {
+    glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity();
+    glOrtho(0, windowW, windowH, 0, -1, 1);
+    glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity();
+    glDisable(GL_TEXTURE_2D);
+    glColor3f(1, 1, 1);
+    glBegin(GL_LINES);
+    glVertex2f(windowW * 0.5f - 8, windowH * 0.5f); glVertex2f(windowW * 0.5f + 8, windowH * 0.5f);
+    glVertex2f(windowW * 0.5f, windowH * 0.5f - 8); glVertex2f(windowW * 0.5f, windowH * 0.5f + 8);
+    glEnd();
+    glEnable(GL_TEXTURE_2D);
+    glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW);
+}
+
+void drawHotbar() {
+    glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity();
+    glOrtho(0, windowW, windowH, 0, -1, 1);
+    glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity();
+
+    int slot = 52;
+    int pad = 6;
+    int total = 9 * slot + 8 * pad;
+    int x0 = (windowW - total) / 2;
+    int y = windowH - 72;
+
+    glDisable(GL_TEXTURE_2D);
+    for (int i = 0; i < 9; ++i) {
+        int x = x0 + i * (slot + pad);
+        if (i == selectedSlot) glColor3f(1.0f, 0.9f, 0.2f);
+        else glColor3f(0.12f, 0.12f, 0.12f);
+        glBegin(GL_QUADS);
+        glVertex2f(x - 2, y - 2); glVertex2f(x + slot + 2, y - 2); glVertex2f(x + slot + 2, y + slot + 2); glVertex2f(x - 2, y + slot + 2);
+        glEnd();
+
+        glColor3f(0.25f, 0.25f, 0.25f);
+        glBegin(GL_QUADS);
+        glVertex2f(x, y); glVertex2f(x + slot, y); glVertex2f(x + slot, y + slot); glVertex2f(x, y + slot);
+        glEnd();
+
+        auto bt = hotbar[i];
+        auto names = blockTex[bt];
+        GLuint tid = texByName(names.side).id;
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, tid);
+        glColor3f(1,1,1);
+        glBegin(GL_QUADS);
+        glTexCoord2f(0,0); glVertex2f(x + 8, y + 8);
+        glTexCoord2f(1,0); glVertex2f(x + slot - 8, y + 8);
+        glTexCoord2f(1,1); glVertex2f(x + slot - 8, y + slot - 8);
+        glTexCoord2f(0,1); glVertex2f(x + 8, y + slot - 8);
+        glEnd();
+        glDisable(GL_TEXTURE_2D);
+    }
+
+    glColor3f(1, 1, 1);
+    glRasterPos2f(18, 24);
+    std::string tip = "WASD move | Mouse look | LMB break | RMB place | 1-9 select | Space jump | Tab sprint";
+    for (char c : tip) glutBitmapCharacter(GLUT_BITMAP_8_BY_13, c);
+
+    glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW);
+}
+
+void renderWorld() {
+    glEnable(GL_TEXTURE_2D);
+    for (int y = 0; y < WORLD_Y; ++y) {
+        for (int z = 0; z < WORLD_Z; ++z) {
+            for (int x = 0; x < WORLD_X; ++x) {
+                auto b = getBlock(x, y, z);
+                if (b == AIR) continue;
+                auto tx = blockTex[(BlockType)b];
+                GLuint tTop = texByName(tx.top).id;
+                GLuint tSide = texByName(tx.side).id;
+                GLuint tBottom = texByName(tx.bottom).id;
+
+                if (getBlock(x + 1, y, z) == AIR) drawFace((float)x, (float)y, (float)z, 0, tSide);
+                if (getBlock(x - 1, y, z) == AIR) drawFace((float)x, (float)y, (float)z, 1, tSide);
+                if (getBlock(x, y + 1, z) == AIR) drawFace((float)x, (float)y, (float)z, 2, tTop);
+                if (getBlock(x, y - 1, z) == AIR) drawFace((float)x, (float)y, (float)z, 3, tBottom);
+                if (getBlock(x, y, z + 1) == AIR) drawFace((float)x, (float)y, (float)z, 4, tSide);
+                if (getBlock(x, y, z - 1) == AIR) drawFace((float)x, (float)y, (float)z, 5, tSide);
+            }
+        }
+    }
+}
+
+void display() {
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    gluPerspective(75.0, (double)windowW / (double)windowH, 0.05, 500.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    applyCamera();
+
+    glColor3f(1, 1, 1);
+    renderWorld();
+    drawCrosshair();
+    drawHotbar();
+
+    glutSwapBuffers();
+}
+
+void idle() {
+    int now = glutGet(GLUT_ELAPSED_TIME);
+    deltaTime = std::max(0.001f, (now - lastTicks) / 1000.0f);
+    lastTicks = now;
+    physicsStep();
+    glutPostRedisplay();
+}
+
+void reshape(int w, int h) {
+    windowW = w; windowH = h;
+    glViewport(0, 0, w, h);
+}
+
+void keyboard(unsigned char key, int, int) {
+    keyDown[key] = true;
+    if (key >= '1' && key <= '9') selectedSlot = key - '1';
+    if (key == 27) std::exit(0);
+}
+
+void keyboardUp(unsigned char key, int, int) { keyDown[key] = false; }
+
+void mouseMotion(int x, int y) {
+    if (firstMouse) { lastMouseX = x; lastMouseY = y; firstMouse = false; }
+    int dx = x - lastMouseX;
+    int dy = y - lastMouseY;
+    lastMouseX = x; lastMouseY = y;
+
+    float sens = 0.0022f;
+    yaw += dx * sens;
+    pitch -= dy * sens;
+    if (pitch > 1.55f) pitch = 1.55f;
+    if (pitch < -1.55f) pitch = -1.55f;
+}
+
+void mouseButton(int button, int state, int, int) {
+    if (state != GLUT_DOWN) return;
+    IVec3 hit{}, prev{};
+    if (!raycastBlock(hit, prev)) return;
+
+    if (button == GLUT_LEFT_BUTTON) {
+        setBlock(hit.x, hit.y, hit.z, AIR);
+    } else if (button == GLUT_RIGHT_BUTTON) {
+        if (getBlock(prev.x, prev.y, prev.z) == AIR) {
+            setBlock(prev.x, prev.y, prev.z, hotbar[selectedSlot]);
+        }
+    }
+}
+
+void initGL() {
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_TEXTURE_2D);
+    glClearColor(0.53f, 0.81f, 0.98f, 1.0f);
+}
+
+int main(int argc, char** argv) {
+    glutInit(&argc, argv);
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH);
+    glutInitWindowSize(windowW, windowH);
+    glutCreateWindow("minecraft-2 (C++ / OpenGL)");
+    glutFullScreen();
+    windowW = glutGet(GLUT_WINDOW_WIDTH);
+    windowH = glutGet(GLUT_WINDOW_HEIGHT);
+
+    initGL();
+    generateWorld();
+
+    std::cout << "Asset root: " << (assetRoot().empty() ? "(none, using fallback textures)" : assetRoot()) << "\n";
+
+    glutDisplayFunc(display);
+    glutIdleFunc(idle);
+    glutReshapeFunc(reshape);
+    glutKeyboardFunc(keyboard);
+    glutKeyboardUpFunc(keyboardUp);
+    glutPassiveMotionFunc(mouseMotion);
+    glutMotionFunc(mouseMotion);
+    glutMouseFunc(mouseButton);
+
+    lastTicks = glutGet(GLUT_ELAPSED_TIME);
+    glutSetCursor(GLUT_CURSOR_NONE);
+    glutWarpPointer(windowW / 2, windowH / 2);
+    firstMouse = true;
+
+    glutMainLoop();
+    return 0;
+}
