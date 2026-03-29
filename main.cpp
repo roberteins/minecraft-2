@@ -229,13 +229,46 @@ std::string assetRoot() {
     const char* env = std::getenv("MC_ASSET_ROOT");
     if (env && *env) return std::string(env);
     if (fs::exists("/src/textures")) return "/src";
+    if (fs::exists("/src/assets/minecraft/textures")) return "/src/assets/minecraft";
+    if (fs::exists("/src/minecraft/textures")) return "/src/minecraft";
     if (fs::exists("./src/textures")) return "./src";
+    if (fs::exists("./src/assets/minecraft/textures")) return "./src/assets/minecraft";
+    if (fs::exists("./src/minecraft/textures")) return "./src/minecraft";
+    return "";
+}
+
+std::string resolveTexturePath(const std::string& name) {
+    std::vector<std::string> roots;
+    const char* env = std::getenv("MC_ASSET_ROOT");
+    if (env && *env) roots.emplace_back(env);
+    roots.emplace_back("/src");
+    roots.emplace_back("./src");
+    roots.emplace_back("/src/assets/minecraft");
+    roots.emplace_back("./src/assets/minecraft");
+    roots.emplace_back("/src/minecraft");
+    roots.emplace_back("./src/minecraft");
+
+    const std::vector<std::string> patterns = {
+        "textures/block/" + name + ".png",
+        "assets/minecraft/textures/block/" + name + ".png",
+        "minecraft/textures/block/" + name + ".png",
+        "textures/blocks/" + name + ".png",
+        "textures/item/" + name + ".png",
+        "assets/minecraft/textures/item/" + name + ".png",
+        "minecraft/textures/item/" + name + ".png"
+    };
+
+    for (const auto& root : roots) {
+        for (const auto& rel : patterns) {
+            fs::path p = fs::path(root) / rel;
+            if (fs::exists(p)) return p.string();
+        }
+    }
     return "";
 }
 
 Texture texByName(const std::string& name) {
-    std::string root = assetRoot();
-    std::string path = root.empty() ? "" : root + "/textures/block/" + name + ".png";
+    std::string path = resolveTexturePath(name);
     uint8_t r = 180, g = 180, b = 180;
     if (name.find("grass") != std::string::npos) { r = 95; g = 180; b = 60; }
     if (name.find("dirt") != std::string::npos) { r = 130; g = 95; b = 65; }
@@ -595,6 +628,41 @@ void renderWorld() {
     glColor3f(1, 1, 1);
 }
 
+void drawBlockOutline() {
+    IVec3 hit{}, prev{};
+    if (!raycastBlock(hit, prev)) return;
+
+    const float e = 0.002f;
+    float x0 = (float)hit.x - e, y0 = (float)hit.y - e, z0 = (float)hit.z - e;
+    float x1 = (float)hit.x + 1.0f + e, y1 = (float)hit.y + 1.0f + e, z1 = (float)hit.z + 1.0f + e;
+
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_CULL_FACE);
+    glColor3f(0.0f, 0.0f, 0.0f);
+    glLineWidth(2.0f);
+    glBegin(GL_LINES);
+    // bottom
+    glVertex3f(x0, y0, z0); glVertex3f(x1, y0, z0);
+    glVertex3f(x1, y0, z0); glVertex3f(x1, y0, z1);
+    glVertex3f(x1, y0, z1); glVertex3f(x0, y0, z1);
+    glVertex3f(x0, y0, z1); glVertex3f(x0, y0, z0);
+    // top
+    glVertex3f(x0, y1, z0); glVertex3f(x1, y1, z0);
+    glVertex3f(x1, y1, z0); glVertex3f(x1, y1, z1);
+    glVertex3f(x1, y1, z1); glVertex3f(x0, y1, z1);
+    glVertex3f(x0, y1, z1); glVertex3f(x0, y1, z0);
+    // verticals
+    glVertex3f(x0, y0, z0); glVertex3f(x0, y1, z0);
+    glVertex3f(x1, y0, z0); glVertex3f(x1, y1, z0);
+    glVertex3f(x1, y0, z1); glVertex3f(x1, y1, z1);
+    glVertex3f(x0, y0, z1); glVertex3f(x0, y1, z1);
+    glEnd();
+    glLineWidth(1.0f);
+    glEnable(GL_CULL_FACE);
+    glEnable(GL_TEXTURE_2D);
+    glColor3f(1, 1, 1);
+}
+
 void display() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glMatrixMode(GL_PROJECTION);
@@ -607,6 +675,7 @@ void display() {
 
     glColor3f(1, 1, 1);
     renderWorld();
+    drawBlockOutline();
     drawCrosshair();
     drawHotbar();
     drawInventory();
