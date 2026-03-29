@@ -43,7 +43,6 @@ static Vec3 playerPos{24.0f, 12.0f, 24.0f};
 static Vec3 velocity{0, 0, 0};
 static float yaw = 0.0f, pitch = 0.0f;
 static bool keyDown[256]{};
-static bool keyDownSpecial[256]{};
 static bool onGround = false;
 static int selectedSlot = 0;
 static BlockType hotbar[9] = {GRASS, DIRT, STONE, OAK_PLANKS, COBBLESTONE, SAND, GLASS, OAK_LOG, BRICKS};
@@ -192,40 +191,40 @@ void drawFace(float x, float y, float z, int face, GLuint texId) {
     glBegin(GL_QUADS);
     switch (face) {
         case 0: // +X
-            glTexCoord2f(0, 0); glVertex3f(x + 1, y, z);
-            glTexCoord2f(1, 0); glVertex3f(x + 1, y, z + 1);
-            glTexCoord2f(1, 1); glVertex3f(x + 1, y + 1, z + 1);
-            glTexCoord2f(0, 1); glVertex3f(x + 1, y + 1, z);
-            break;
-        case 1: // -X
-            glTexCoord2f(0, 0); glVertex3f(x, y, z + 1);
-            glTexCoord2f(1, 0); glVertex3f(x, y, z);
-            glTexCoord2f(1, 1); glVertex3f(x, y + 1, z);
-            glTexCoord2f(0, 1); glVertex3f(x, y + 1, z + 1);
-            break;
-        case 2: // +Y top
-            glTexCoord2f(0, 0); glVertex3f(x, y + 1, z);
-            glTexCoord2f(1, 0); glVertex3f(x + 1, y + 1, z);
-            glTexCoord2f(1, 1); glVertex3f(x + 1, y + 1, z + 1);
-            glTexCoord2f(0, 1); glVertex3f(x, y + 1, z + 1);
-            break;
-        case 3: // -Y bottom
-            glTexCoord2f(0, 0); glVertex3f(x, y, z + 1);
-            glTexCoord2f(1, 0); glVertex3f(x + 1, y, z + 1);
-            glTexCoord2f(1, 1); glVertex3f(x + 1, y, z);
-            glTexCoord2f(0, 1); glVertex3f(x, y, z);
-            break;
-        case 4: // +Z
             glTexCoord2f(0, 0); glVertex3f(x + 1, y, z + 1);
-            glTexCoord2f(1, 0); glVertex3f(x, y, z + 1);
-            glTexCoord2f(1, 1); glVertex3f(x, y + 1, z + 1);
-            glTexCoord2f(0, 1); glVertex3f(x + 1, y + 1, z + 1);
-            break;
-        case 5: // -Z
-            glTexCoord2f(0, 0); glVertex3f(x, y, z);
             glTexCoord2f(1, 0); glVertex3f(x + 1, y, z);
             glTexCoord2f(1, 1); glVertex3f(x + 1, y + 1, z);
+            glTexCoord2f(0, 1); glVertex3f(x + 1, y + 1, z + 1);
+            break;
+        case 1: // -X
+            glTexCoord2f(0, 0); glVertex3f(x, y, z);
+            glTexCoord2f(1, 0); glVertex3f(x, y, z + 1);
+            glTexCoord2f(1, 1); glVertex3f(x, y + 1, z + 1);
             glTexCoord2f(0, 1); glVertex3f(x, y + 1, z);
+            break;
+        case 2: // +Y top
+            glTexCoord2f(0, 0); glVertex3f(x, y + 1, z + 1);
+            glTexCoord2f(1, 0); glVertex3f(x + 1, y + 1, z + 1);
+            glTexCoord2f(1, 1); glVertex3f(x + 1, y + 1, z);
+            glTexCoord2f(0, 1); glVertex3f(x, y + 1, z);
+            break;
+        case 3: // -Y bottom
+            glTexCoord2f(0, 0); glVertex3f(x, y, z);
+            glTexCoord2f(1, 0); glVertex3f(x + 1, y, z);
+            glTexCoord2f(1, 1); glVertex3f(x + 1, y, z + 1);
+            glTexCoord2f(0, 1); glVertex3f(x, y, z + 1);
+            break;
+        case 4: // +Z
+            glTexCoord2f(0, 0); glVertex3f(x, y, z + 1);
+            glTexCoord2f(1, 0); glVertex3f(x + 1, y, z + 1);
+            glTexCoord2f(1, 1); glVertex3f(x + 1, y + 1, z + 1);
+            glTexCoord2f(0, 1); glVertex3f(x, y + 1, z + 1);
+            break;
+        case 5: // -Z
+            glTexCoord2f(0, 0); glVertex3f(x + 1, y, z);
+            glTexCoord2f(1, 0); glVertex3f(x, y, z);
+            glTexCoord2f(1, 1); glVertex3f(x, y + 1, z);
+            glTexCoord2f(0, 1); glVertex3f(x + 1, y + 1, z);
             break;
     }
     glEnd();
@@ -501,6 +500,9 @@ int main(int argc, char** argv) {
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH);
     glutInitWindowSize(windowW, windowH);
     glutCreateWindow("minecraft-2 (C++ / OpenGL)");
+    glutFullScreen();
+    windowW = glutGet(GLUT_WINDOW_WIDTH);
+    windowH = glutGet(GLUT_WINDOW_HEIGHT);
 
     initGL();
     generateWorld();
