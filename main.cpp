@@ -72,6 +72,7 @@ struct ItemStack {
 struct BlockTextureSet {
     GLuint top = 0;
     GLuint side = 0;
+    GLuint sideOverlay = 0;
     GLuint bottom = 0;
 };
 
@@ -314,6 +315,7 @@ void preloadBlockTextures() {
         auto tx = blockTex[(BlockType)b];
         blockTextures[b].top = texByName(tx.top).id;
         blockTextures[b].side = texByName(tx.side).id;
+        if (b == GRASS) blockTextures[b].sideOverlay = texByName("grass_block_side_overlay").id;
         blockTextures[b].bottom = texByName(tx.bottom).id;
     }
 }
@@ -679,18 +681,29 @@ void renderWorld() {
                 if (b == AIR) continue;
                 GLuint tTop = blockTextures[b].top;
                 GLuint tSide = blockTextures[b].side;
+                GLuint tSideOverlay = blockTextures[b].sideOverlay;
                 GLuint tBottom = blockTextures[b].bottom;
                 const bool tintGrass = (b == GRASS);
 
                 if (getBlock(x + 1, y, z) == AIR) {
-                    if (tintGrass) glColor3f(0.54f, 0.74f, 0.34f); else glColor3f(1, 1, 1);
+                    glColor3f(1, 1, 1);
                     if (currentTex != tSide) { glBindTexture(GL_TEXTURE_2D, tSide); currentTex = tSide; }
                     drawFace((float)x, (float)y, (float)z, 0);
+                    if (tintGrass && tSideOverlay != 0) {
+                        glColor3f(0.54f, 0.74f, 0.34f);
+                        if (currentTex != tSideOverlay) { glBindTexture(GL_TEXTURE_2D, tSideOverlay); currentTex = tSideOverlay; }
+                        drawFace((float)x, (float)y, (float)z, 0);
+                    }
                 }
                 if (getBlock(x - 1, y, z) == AIR) {
-                    if (tintGrass) glColor3f(0.54f, 0.74f, 0.34f); else glColor3f(1, 1, 1);
+                    glColor3f(1, 1, 1);
                     if (currentTex != tSide) { glBindTexture(GL_TEXTURE_2D, tSide); currentTex = tSide; }
                     drawFace((float)x, (float)y, (float)z, 1);
+                    if (tintGrass && tSideOverlay != 0) {
+                        glColor3f(0.54f, 0.74f, 0.34f);
+                        if (currentTex != tSideOverlay) { glBindTexture(GL_TEXTURE_2D, tSideOverlay); currentTex = tSideOverlay; }
+                        drawFace((float)x, (float)y, (float)z, 1);
+                    }
                 }
                 if (getBlock(x, y + 1, z) == AIR) {
                     if (tintGrass) glColor3f(0.54f, 0.74f, 0.34f); else glColor3f(1, 1, 1);
@@ -703,14 +716,24 @@ void renderWorld() {
                     drawFace((float)x, (float)y, (float)z, 3);
                 }
                 if (getBlock(x, y, z + 1) == AIR) {
-                    if (tintGrass) glColor3f(0.54f, 0.74f, 0.34f); else glColor3f(1, 1, 1);
+                    glColor3f(1, 1, 1);
                     if (currentTex != tSide) { glBindTexture(GL_TEXTURE_2D, tSide); currentTex = tSide; }
                     drawFace((float)x, (float)y, (float)z, 4);
+                    if (tintGrass && tSideOverlay != 0) {
+                        glColor3f(0.54f, 0.74f, 0.34f);
+                        if (currentTex != tSideOverlay) { glBindTexture(GL_TEXTURE_2D, tSideOverlay); currentTex = tSideOverlay; }
+                        drawFace((float)x, (float)y, (float)z, 4);
+                    }
                 }
                 if (getBlock(x, y, z - 1) == AIR) {
-                    if (tintGrass) glColor3f(0.54f, 0.74f, 0.34f); else glColor3f(1, 1, 1);
+                    glColor3f(1, 1, 1);
                     if (currentTex != tSide) { glBindTexture(GL_TEXTURE_2D, tSide); currentTex = tSide; }
                     drawFace((float)x, (float)y, (float)z, 5);
+                    if (tintGrass && tSideOverlay != 0) {
+                        glColor3f(0.54f, 0.74f, 0.34f);
+                        if (currentTex != tSideOverlay) { glBindTexture(GL_TEXTURE_2D, tSideOverlay); currentTex = tSideOverlay; }
+                        drawFace((float)x, (float)y, (float)z, 5);
+                    }
                 }
             }
         }
@@ -841,7 +864,12 @@ void mouseButton(int button, int state, int, int) {
     } else if (button == GLUT_RIGHT_BUTTON) {
         if (inventory[selectedSlot].count <= 0 || inventory[selectedSlot].block == AIR) return;
         if (getBlock(prev.x, prev.y, prev.z) == AIR) {
+            if (prev.x < 0 || prev.y < 0 || prev.z < 0 || prev.x >= WORLD_X || prev.y >= WORLD_Y || prev.z >= WORLD_Z) return;
             setBlock(prev.x, prev.y, prev.z, inventory[selectedSlot].block);
+            if (intersectsSolid(playerPos)) {
+                setBlock(prev.x, prev.y, prev.z, AIR);
+                return;
+            }
             consumeHotbarSelected();
         }
     }
