@@ -191,16 +191,16 @@ void drawFace(float x, float y, float z, int face, GLuint texId) {
     glBegin(GL_QUADS);
     switch (face) {
         case 0: // +X
-            glTexCoord2f(0, 0); glVertex3f(x + 1, y, z + 1);
-            glTexCoord2f(1, 0); glVertex3f(x + 1, y, z);
-            glTexCoord2f(1, 1); glVertex3f(x + 1, y + 1, z);
-            glTexCoord2f(0, 1); glVertex3f(x + 1, y + 1, z + 1);
+            glTexCoord2f(0, 1); glVertex3f(x + 1, y, z + 1);
+            glTexCoord2f(1, 1); glVertex3f(x + 1, y, z);
+            glTexCoord2f(1, 0); glVertex3f(x + 1, y + 1, z);
+            glTexCoord2f(0, 0); glVertex3f(x + 1, y + 1, z + 1);
             break;
         case 1: // -X
-            glTexCoord2f(0, 0); glVertex3f(x, y, z);
-            glTexCoord2f(1, 0); glVertex3f(x, y, z + 1);
-            glTexCoord2f(1, 1); glVertex3f(x, y + 1, z + 1);
-            glTexCoord2f(0, 1); glVertex3f(x, y + 1, z);
+            glTexCoord2f(0, 1); glVertex3f(x, y, z);
+            glTexCoord2f(1, 1); glVertex3f(x, y, z + 1);
+            glTexCoord2f(1, 0); glVertex3f(x, y + 1, z + 1);
+            glTexCoord2f(0, 0); glVertex3f(x, y + 1, z);
             break;
         case 2: // +Y top
             glTexCoord2f(0, 0); glVertex3f(x, y + 1, z + 1);
@@ -215,16 +215,16 @@ void drawFace(float x, float y, float z, int face, GLuint texId) {
             glTexCoord2f(0, 1); glVertex3f(x, y, z + 1);
             break;
         case 4: // +Z
-            glTexCoord2f(0, 0); glVertex3f(x, y, z + 1);
-            glTexCoord2f(1, 0); glVertex3f(x + 1, y, z + 1);
-            glTexCoord2f(1, 1); glVertex3f(x + 1, y + 1, z + 1);
-            glTexCoord2f(0, 1); glVertex3f(x, y + 1, z + 1);
+            glTexCoord2f(0, 1); glVertex3f(x, y, z + 1);
+            glTexCoord2f(1, 1); glVertex3f(x + 1, y, z + 1);
+            glTexCoord2f(1, 0); glVertex3f(x + 1, y + 1, z + 1);
+            glTexCoord2f(0, 0); glVertex3f(x, y + 1, z + 1);
             break;
         case 5: // -Z
-            glTexCoord2f(0, 0); glVertex3f(x + 1, y, z);
-            glTexCoord2f(1, 0); glVertex3f(x, y, z);
-            glTexCoord2f(1, 1); glVertex3f(x, y + 1, z);
-            glTexCoord2f(0, 1); glVertex3f(x + 1, y + 1, z);
+            glTexCoord2f(0, 1); glVertex3f(x + 1, y, z);
+            glTexCoord2f(1, 1); glVertex3f(x, y, z);
+            glTexCoord2f(1, 0); glVertex3f(x, y + 1, z);
+            glTexCoord2f(0, 0); glVertex3f(x + 1, y + 1, z);
             break;
     }
     glEnd();
@@ -408,16 +408,36 @@ void renderWorld() {
                 GLuint tTop = texByName(tx.top).id;
                 GLuint tSide = texByName(tx.side).id;
                 GLuint tBottom = texByName(tx.bottom).id;
+                const bool tintGrass = (b == GRASS);
 
-                if (getBlock(x + 1, y, z) == AIR) drawFace((float)x, (float)y, (float)z, 0, tSide);
-                if (getBlock(x - 1, y, z) == AIR) drawFace((float)x, (float)y, (float)z, 1, tSide);
-                if (getBlock(x, y + 1, z) == AIR) drawFace((float)x, (float)y, (float)z, 2, tTop);
-                if (getBlock(x, y - 1, z) == AIR) drawFace((float)x, (float)y, (float)z, 3, tBottom);
-                if (getBlock(x, y, z + 1) == AIR) drawFace((float)x, (float)y, (float)z, 4, tSide);
-                if (getBlock(x, y, z - 1) == AIR) drawFace((float)x, (float)y, (float)z, 5, tSide);
+                if (getBlock(x + 1, y, z) == AIR) {
+                    if (tintGrass) glColor3f(0.54f, 0.74f, 0.34f); else glColor3f(1, 1, 1);
+                    drawFace((float)x, (float)y, (float)z, 0, tSide);
+                }
+                if (getBlock(x - 1, y, z) == AIR) {
+                    if (tintGrass) glColor3f(0.54f, 0.74f, 0.34f); else glColor3f(1, 1, 1);
+                    drawFace((float)x, (float)y, (float)z, 1, tSide);
+                }
+                if (getBlock(x, y + 1, z) == AIR) {
+                    if (tintGrass) glColor3f(0.54f, 0.74f, 0.34f); else glColor3f(1, 1, 1);
+                    drawFace((float)x, (float)y, (float)z, 2, tTop);
+                }
+                if (getBlock(x, y - 1, z) == AIR) {
+                    glColor3f(1, 1, 1);
+                    drawFace((float)x, (float)y, (float)z, 3, tBottom);
+                }
+                if (getBlock(x, y, z + 1) == AIR) {
+                    if (tintGrass) glColor3f(0.54f, 0.74f, 0.34f); else glColor3f(1, 1, 1);
+                    drawFace((float)x, (float)y, (float)z, 4, tSide);
+                }
+                if (getBlock(x, y, z - 1) == AIR) {
+                    if (tintGrass) glColor3f(0.54f, 0.74f, 0.34f); else glColor3f(1, 1, 1);
+                    drawFace((float)x, (float)y, (float)z, 5, tSide);
+                }
             }
         }
     }
+    glColor3f(1, 1, 1);
 }
 
 void display() {
