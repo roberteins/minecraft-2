@@ -69,7 +69,14 @@ struct ItemStack {
     int count = 0;
 };
 
+struct BlockTextureSet {
+    GLuint top = 0;
+    GLuint side = 0;
+    GLuint bottom = 0;
+};
+
 static ItemStack inventory[INVENTORY_SLOTS];
+static BlockTextureSet blockTextures[BLOCK_COUNT];
 
 static std::map<std::string, Texture> texCache;
 
@@ -238,8 +245,16 @@ Texture texByName(const std::string& name) {
     return loadTexture(name, path, r, g, b);
 }
 
-void drawFace(float x, float y, float z, int face, GLuint texId) {
-    glBindTexture(GL_TEXTURE_2D, texId);
+void preloadBlockTextures() {
+    for (int b = 1; b < BLOCK_COUNT; ++b) {
+        auto tx = blockTex[(BlockType)b];
+        blockTextures[b].top = texByName(tx.top).id;
+        blockTextures[b].side = texByName(tx.side).id;
+        blockTextures[b].bottom = texByName(tx.bottom).id;
+    }
+}
+
+void drawFace(float x, float y, float z, int face) {
     glBegin(GL_QUADS);
     switch (face) {
         case 0: // +X
@@ -525,40 +540,54 @@ void drawInventory() {
 
 void renderWorld() {
     glEnable(GL_TEXTURE_2D);
+    const int renderDistance = 24;
+    int px = int(std::floor(playerPos.x));
+    int pz = int(std::floor(playerPos.z));
+    int minX = std::max(0, px - renderDistance);
+    int maxX = std::min(WORLD_X - 1, px + renderDistance);
+    int minZ = std::max(0, pz - renderDistance);
+    int maxZ = std::min(WORLD_Z - 1, pz + renderDistance);
+    GLuint currentTex = 0;
+
     for (int y = 0; y < WORLD_Y; ++y) {
-        for (int z = 0; z < WORLD_Z; ++z) {
-            for (int x = 0; x < WORLD_X; ++x) {
+        for (int z = minZ; z <= maxZ; ++z) {
+            for (int x = minX; x <= maxX; ++x) {
                 auto b = getBlock(x, y, z);
                 if (b == AIR) continue;
-                auto tx = blockTex[(BlockType)b];
-                GLuint tTop = texByName(tx.top).id;
-                GLuint tSide = texByName(tx.side).id;
-                GLuint tBottom = texByName(tx.bottom).id;
+                GLuint tTop = blockTextures[b].top;
+                GLuint tSide = blockTextures[b].side;
+                GLuint tBottom = blockTextures[b].bottom;
                 const bool tintGrass = (b == GRASS);
 
                 if (getBlock(x + 1, y, z) == AIR) {
                     if (tintGrass) glColor3f(0.54f, 0.74f, 0.34f); else glColor3f(1, 1, 1);
-                    drawFace((float)x, (float)y, (float)z, 0, tSide);
+                    if (currentTex != tSide) { glBindTexture(GL_TEXTURE_2D, tSide); currentTex = tSide; }
+                    drawFace((float)x, (float)y, (float)z, 0);
                 }
                 if (getBlock(x - 1, y, z) == AIR) {
                     if (tintGrass) glColor3f(0.54f, 0.74f, 0.34f); else glColor3f(1, 1, 1);
-                    drawFace((float)x, (float)y, (float)z, 1, tSide);
+                    if (currentTex != tSide) { glBindTexture(GL_TEXTURE_2D, tSide); currentTex = tSide; }
+                    drawFace((float)x, (float)y, (float)z, 1);
                 }
                 if (getBlock(x, y + 1, z) == AIR) {
                     if (tintGrass) glColor3f(0.54f, 0.74f, 0.34f); else glColor3f(1, 1, 1);
-                    drawFace((float)x, (float)y, (float)z, 2, tTop);
+                    if (currentTex != tTop) { glBindTexture(GL_TEXTURE_2D, tTop); currentTex = tTop; }
+                    drawFace((float)x, (float)y, (float)z, 2);
                 }
                 if (getBlock(x, y - 1, z) == AIR) {
                     glColor3f(1, 1, 1);
-                    drawFace((float)x, (float)y, (float)z, 3, tBottom);
+                    if (currentTex != tBottom) { glBindTexture(GL_TEXTURE_2D, tBottom); currentTex = tBottom; }
+                    drawFace((float)x, (float)y, (float)z, 3);
                 }
                 if (getBlock(x, y, z + 1) == AIR) {
                     if (tintGrass) glColor3f(0.54f, 0.74f, 0.34f); else glColor3f(1, 1, 1);
-                    drawFace((float)x, (float)y, (float)z, 4, tSide);
+                    if (currentTex != tSide) { glBindTexture(GL_TEXTURE_2D, tSide); currentTex = tSide; }
+                    drawFace((float)x, (float)y, (float)z, 4);
                 }
                 if (getBlock(x, y, z - 1) == AIR) {
                     if (tintGrass) glColor3f(0.54f, 0.74f, 0.34f); else glColor3f(1, 1, 1);
-                    drawFace((float)x, (float)y, (float)z, 5, tSide);
+                    if (currentTex != tSide) { glBindTexture(GL_TEXTURE_2D, tSide); currentTex = tSide; }
+                    drawFace((float)x, (float)y, (float)z, 5);
                 }
             }
         }
@@ -659,9 +688,9 @@ void mouseButton(int button, int state, int, int) {
 void initGL() {
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_TEXTURE_2D);
+    glEnable(GL_ALPHA_TEST);
+    glAlphaFunc(GL_GREATER, 0.05f);
     glClearColor(0.53f, 0.81f, 0.98f, 1.0f);
 }
 
@@ -677,6 +706,7 @@ int main(int argc, char** argv) {
     initGL();
     generateWorld();
     initInventory();
+    preloadBlockTextures();
 
     std::cout << "Asset root: " << (assetRoot().empty() ? "(none, using fallback textures)" : assetRoot()) << "\n";
 
